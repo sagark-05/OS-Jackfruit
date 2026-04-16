@@ -183,16 +183,6 @@ All demo screenshots for Tasks 1–6 are included in this repository under the `
 
 ---
 
-## Task 6: Resource Cleanup (Verification)
-
-Task 6 focuses on verifying that teardown works end-to-end across both user space and kernel space (not redesigning cleanup from scratch).
-
-### What we verified
-
-- **Child process reap (no zombies)**: After stopping containers and shutting down the supervisor, `ps` shows no processes in zombie (`Z`) state. The supervisor reaps exited children using `waitpid(-1, WNOHANG)` on `SIGCHLD`.
-- **Logging shutdown**: Producer threads stop after the container pipe reaches EOF, and the bounded buffer shutdown wakes the consumer so the logger thread drains remaining entries and exits.
-- **Descriptor cleanup**: Control socket `/tmp/mini_runtime.sock` is removed on shutdown; pipe ends are closed after use; log files are opened for append and closed after writes.
-- **Kernel cleanup on unload**: On `rmmod monitor`, the module frees all remaining monitored entries so no stale state persists across runs.
 
 ### Evidence commands
 
@@ -317,28 +307,13 @@ Both containers ran `cpu_hog` for 10 seconds simultaneously. Wall-clock completi
 
 ---
 
-## 6. Scheduler Experiment Results
+## Task 6: Resource Cleanup (Verification)
 
-### Experiment 1 — Two CPU-bound containers with different priorities
+Task 6 focuses on verifying that teardown works end-to-end across both user space and kernel space (not redesigning cleanup from scratch).
 
-| Container | nice value | CFS weight | Wall-clock time | Notes |
-|-----------|-----------|------------|-----------------|-------|
-| alpha | 0 | 1024 | 9.725s | Default priority |
-| beta | 15 | 149 | 9.726s | Low priority |
+### What we verified
 
-Both completed in the same wall-clock time on our multi-core system because the workload duration (10s) was short enough for both to finish without starvation. Under sustained load on a single core, CFS would allocate CPU in ratio 1024:149 ≈ 6.9:1, giving alpha ~87% and beta ~13% of CPU time.
-
-**Conclusion:** The Linux CFS scheduler uses weighted fair queuing. Under light load, all runnable processes get CPU. Under heavy contention, nice values directly control CPU share allocation.
-
-### Experiment 2 — CPU-bound vs I/O-bound containers
-
-| Container | Workload | Duration | Behaviour |
-|-----------|----------|----------|-----------|
-| cpuwork | cpu_hog | 10s | Never sleeps, always runnable |
-| iowork | io_pulse | ~4s | Sleeps 200ms between iterations |
-
-`io_pulse` completed all 20 iterations in approximately 4 seconds despite running alongside a CPU-bound workload. The I/O-bound container spent most of its time sleeping (200ms × 20 = 4s total sleep), voluntarily yielding the CPU to `cpu_hog` between iterations.
-
-When `io_pulse` woke from sleep, CFS immediately scheduled it because its virtual runtime was lower than `cpu_hog`'s (it had been sleeping, accumulating a scheduling credit). This demonstrates CFS's responsiveness guarantee — I/O-bound tasks are never starved by CPU-bound tasks.
-
-**Conclusion:** The Linux CFS scheduler naturally favours I/O-bound tasks by giving them scheduling credit during sleep periods. CPU-bound tasks fill available CPU time without blocking I/O-bound tasks from getting timely service.
+- **Child process reap (no zombies)**: After stopping containers and shutting down the supervisor, `ps` shows no processes in zombie (`Z`) state. The supervisor reaps exited children using `waitpid(-1, WNOHANG)` on `SIGCHLD`.
+- **Logging shutdown**: Producer threads stop after the container pipe reaches EOF, and the bounded buffer shutdown wakes the consumer so the logger thread drains remaining entries and exits.
+- **Descriptor cleanup**: Control socket `/tmp/mini_runtime.sock` is removed on shutdown; pipe ends are closed after use; log files are opened for append and closed after writes.
+- **Kernel cleanup on unload**: On `rmmod monitor`, the module frees all remaining monitored entries so no stale state persists across runs.
