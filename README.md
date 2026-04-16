@@ -13,7 +13,7 @@
 
 ### Prerequisites
 
-- Ubuntu 22.04 or 24.04 (bare metal or VM)
+- Ubuntu 22.04 or 24.04 VM (recommended). Secure Boot must be OFF for module loading.
 - Secure Boot **OFF** (required for kernel module loading)
 - Linux kernel headers installed
 
@@ -25,13 +25,13 @@ sudo apt install -y build-essential linux-headers-$(uname -r)
 ### Build
 
 ```bash
-cd boilerplate
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
 
-# Build all user-space binaries
+# CI-safe build (user-space only)
 make ci
 
-# Build kernel module (requires kernel headers)
-sudo make module
+# Full build (user-space + kernel module)
+make all
 
 # Verify binaries exist
 ls engine cpu_hog io_pulse memory_hog monitor.ko
@@ -40,128 +40,185 @@ ls engine cpu_hog io_pulse memory_hog monitor.ko
 ### Set Up Root Filesystem
 
 ```bash
-cd boilerplate
+cd /home/sagark/Desktop/OS-Jackfruit
 
 mkdir -p rootfs-base
-wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
-sudo tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
+wget -O alpine-minirootfs.tar.gz \
+  https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
+tar -xzf alpine-minirootfs.tar.gz -C rootfs-base
 
 # Create per-container writable copies
-sudo cp -a rootfs-base rootfs-alpha
-sudo cp -a rootfs-base rootfs-beta
+cp -a rootfs-base rootfs-alpha
+cp -a rootfs-base rootfs-beta
 
 # Copy workload binaries into rootfs copies
-sudo cp cpu_hog memory_hog io_pulse rootfs-alpha/
-sudo cp cpu_hog memory_hog io_pulse rootfs-beta/
+cp -a ./boilerplate/cpu_hog    ./rootfs-alpha/
+cp -a ./boilerplate/memory_hog ./rootfs-alpha/
+cp -a ./boilerplate/io_pulse   ./rootfs-alpha/
+cp -a ./boilerplate/cpu_hog    ./rootfs-beta/
+cp -a ./boilerplate/memory_hog ./rootfs-beta/
+cp -a ./boilerplate/io_pulse   ./rootfs-beta/
 ```
 
 ### Load Kernel Module
 
 ```bash
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
+sudo rmmod monitor 2>/dev/null || true
 sudo insmod monitor.ko
 
 # Verify device was created
 ls -la /dev/container_monitor
 
 # Check kernel log
-sudo dmesg | tail -3
+sudo dmesg | tail -n 30
 ```
 
 ### Start Supervisor
 
 ```bash
+cd /home/sagark/Desktop/OS-Jackfruit
 sudo rm -f /tmp/mini_runtime.sock
-sudo ./engine supervisor ./rootfs-base
+sudo ./boilerplate/engine supervisor ./rootfs-base
 ```
 
 ### Launch Containers
 
 ```bash
-# In a second terminal:
+cd /home/sagark/Desktop/OS-Jackfruit
 
 # Start a container in background
-sudo ./engine start alpha ./rootfs-alpha /cpu_hog
+sudo ./boilerplate/engine start alpha ./rootfs-alpha /cpu_hog
 
 # Start a container and wait for it to finish
-sudo ./engine run beta ./rootfs-beta /cpu_hog
+sudo ./boilerplate/engine run beta ./rootfs-beta /cpu_hog
 
 # Start with custom memory limits and priority
-sudo ./engine start memtest ./rootfs-alpha /memory_hog \
+sudo ./boilerplate/engine start memtest ./rootfs-alpha /memory_hog \
     --soft-mib 10 --hard-mib 20 --nice 5
 ```
 
 ### CLI Commands
 
 ```bash
+cd /home/sagark/Desktop/OS-Jackfruit
+
 # List all containers and their state
-sudo ./engine ps
+sudo ./boilerplate/engine ps
 
 # View container logs
-sudo ./engine logs alpha
+sudo ./boilerplate/engine logs alpha
 
 # Stop a running container
-sudo ./engine stop alpha
+sudo ./boilerplate/engine stop alpha
 ```
 
 ### Unload Module and Clean Up
 
 ```bash
-# Stop supervisor first
-sudo pkill -f "engine supervisor"
+# Stop containers (if running)
+cd /home/sagark/Desktop/OS-Jackfruit
+sudo ./boilerplate/engine stop alpha 2>/dev/null || true
+sudo ./boilerplate/engine stop beta  2>/dev/null || true
+sudo ./boilerplate/engine stop memtest 2>/dev/null || true
+
+# Stop supervisor (recommended): Ctrl+C in the supervisor terminal
 sudo rm -f /tmp/mini_runtime.sock
 
 # Unload kernel module
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
 sudo rmmod monitor
 
 # Verify clean unload
-sudo dmesg | tail -3
+sudo dmesg | tail -n 30
 ```
 
 ### Full Reference Run
 
 ```bash
 # 1. Build
-cd boilerplate
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
 make ci
-sudo make module
+make all
 
 # 2. Load kernel module
+sudo rmmod monitor 2>/dev/null || true
 sudo insmod monitor.ko
 ls -l /dev/container_monitor
 
 # 3. Start supervisor (Terminal 1)
-sudo ./engine supervisor ./rootfs-base
+cd /home/sagark/Desktop/OS-Jackfruit
+sudo ./boilerplate/engine supervisor ./rootfs-base
 
 # 4. Launch containers (Terminal 2)
-sudo ./engine start alpha ./rootfs-alpha /cpu_hog
-sudo ./engine start beta  ./rootfs-beta  /io_pulse
+sudo ./boilerplate/engine start alpha ./rootfs-alpha /cpu_hog
+sudo ./boilerplate/engine start beta  ./rootfs-beta  /io_pulse
 
 # 5. Inspect
-sudo ./engine ps
-sudo ./engine logs alpha
-sudo ./engine logs beta
+sudo ./boilerplate/engine ps
+sudo ./boilerplate/engine logs alpha
+sudo ./boilerplate/engine logs beta
 
 # 6. Test memory limits
-sudo ./engine start memtest ./rootfs-alpha /memory_hog \
+sudo ./boilerplate/engine run memtest ./rootfs-alpha /memory_hog \
     --soft-mib 10 --hard-mib 20
-sleep 8
-sudo dmesg | grep container_monitor | tail -10
+sudo dmesg | tail -n 80
 
 # 7. Stop containers
-sudo ./engine stop alpha
-sudo ./engine stop beta
-sudo ./engine ps
+sudo ./boilerplate/engine stop alpha
+sudo ./boilerplate/engine stop beta
+sudo ./boilerplate/engine ps
 
 # 8. Shutdown supervisor (Ctrl+C in Terminal 1)
 
 # 9. Unload module
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
 sudo rmmod monitor
-sudo dmesg | tail -3
+sudo dmesg | tail -n 30
 ```
 
 ---
 ## 3. Demo Screenshot
-All demo screenshots for Tasks 1–6 are included in this repository under the `boilerplate/screenshots/` directory.
+All demo screenshots for Tasks 1–6 are included in this repository under the `boilerplate/screenshots/` directory (create it if needed).
+
+---
+
+## Task 6: Resource Cleanup (Verification)
+
+Task 6 focuses on verifying that teardown works end-to-end across both user space and kernel space (not redesigning cleanup from scratch).
+
+### What we verified
+
+- **Child process reap (no zombies)**: After stopping containers and shutting down the supervisor, `ps` shows no processes in zombie (`Z`) state. The supervisor reaps exited children using `waitpid(-1, WNOHANG)` on `SIGCHLD`.
+- **Logging shutdown**: Producer threads stop after the container pipe reaches EOF, and the bounded buffer shutdown wakes the consumer so the logger thread drains remaining entries and exits.
+- **Descriptor cleanup**: Control socket `/tmp/mini_runtime.sock` is removed on shutdown; pipe ends are closed after use; log files are opened for append and closed after writes.
+- **Kernel cleanup on unload**: On `rmmod monitor`, the module frees all remaining monitored entries so no stale state persists across runs.
+
+### Evidence commands
+
+```bash
+# Stop containers (ignore errors if already stopped)
+cd /home/sagark/Desktop/OS-Jackfruit
+sudo ./boilerplate/engine stop alpha 2>/dev/null || true
+sudo ./boilerplate/engine stop beta  2>/dev/null || true
+sudo ./boilerplate/engine stop memtest 2>/dev/null || true
+
+# Stop supervisor: Ctrl+C in the supervisor terminal
+
+# Zombie check (should print nothing)
+ps -eo pid,ppid,stat,cmd | awk '$3 ~ /Z/ {print}'
+
+# Confirm no lingering runtime/workload processes
+ps -eo pid,ppid,stat,cmd | egrep ' Z|engine|cpu_hog|io_pulse|memory_hog'
+
+# Kernel module teardown
+cd /home/sagark/Desktop/OS-Jackfruit/boilerplate
+sudo rmmod monitor
+lsmod | grep -w monitor || echo "OK: monitor unloaded"
+sudo dmesg | tail -n 50
+```
+
+**Result:** After shutdown, there are no zombies, the control socket does not linger, logging stops cleanly, and the kernel module unload leaves no tracked entries behind.
 
 
 ## 4. Engineering Analysis
@@ -183,8 +240,8 @@ We use `chroot()` rather than `pivot_root()` for simplicity. The host kernel sti
 The supervisor is a long-running parent process that never exits until explicitly stopped. This design is necessary because:
 
 1. **Orphan prevention:** If the parent exits, container children become orphans adopted by init (PID 1), losing all metadata tracking.
-2. **SIGCHLD delivery:** The kernel delivers SIGCHLD only to the direct parent. Our `sigchld_handler` calls `waitpid(-1, WNOHANG)` in a loop to reap all exited children atomically, preventing zombie accumulation.
-3. **Metadata ownership:** The supervisor owns the `container_record_t` linked list. Each record tracks PID, state, limits, log path, and exit status. The list is protected by `metadata_lock` (a `pthread_mutex_t`) since both the main event loop and the SIGCHLD handler access it concurrently.
+2. **SIGCHLD delivery:** The kernel delivers SIGCHLD only to the direct parent. The supervisor reaps exited children using `waitpid(-1, WNOHANG)` in a loop when it receives SIGCHLD, preventing zombie accumulation.
+3. **Metadata ownership:** The supervisor owns the `container_record_t` linked list. Each record tracks PID, state, limits, log path, and exit status. The list is protected by `metadata_lock` (a `pthread_mutex_t`) since the supervisor loop and signal-driven reaping update shared state.
 
 Container lifecycle transitions:
 - `starting` → `running` (after `clone()` succeeds)
@@ -207,7 +264,7 @@ The bounded buffer uses:
 Without the mutex, two producer threads could simultaneously read `tail=5`, both write to slot 5, and one chunk would be silently overwritten. Without condition variables, threads would spin-poll wasting CPU. The `shutting_down` flag combined with `pthread_cond_broadcast()` ensures clean drain on shutdown — no log lines are lost.
 
 **Path B — Control (CLI → supervisor):**
-The CLI client connects to a UNIX domain socket at `/tmp/mini_runtime.sock`, sends a `control_request_t` struct, and reads back a `control_response_t`. For `CMD_RUN`, the supervisor `dup()`s the client fd and stores it in `run_client_fd` — the SIGCHLD handler writes the final exit status through this fd when the container exits.
+The CLI client connects to a UNIX domain socket at `/tmp/mini_runtime.sock`, sends a `control_request_t` struct, and reads back a response. For `CMD_RUN`, the supervisor keeps the connection open and replies only after the container exits with the final status.
 
 ### 4.4 Memory Management and Enforcement
 
@@ -219,7 +276,7 @@ RSS does not measure virtual memory size, memory-mapped files that haven't been 
 - Soft limit triggers a warning logged to `dmesg`. The process continues running. This gives the operator visibility into memory growth before it becomes critical.
 - Hard limit sends SIGKILL immediately. This is a hard safety boundary that prevents one container from exhausting host memory and triggering the OOM killer.
 
-**Enforcement belongs in kernel space** because a user-space monitor can be outraced: if `memory_hog` allocates 100MB in one `malloc()` call, a 1-second polling loop in user space cannot react before the allocation succeeds. The kernel module's timer fires every second and checks RSS directly from the kernel's `mm_struct` — the same data structure the memory allocator updates. Additionally, only kernel code can reliably `SIGKILL` a process from a different namespace and guarantee delivery.
+**Enforcement belongs in kernel space** because a pure user-space monitor can be outraced and lacks direct access to kernel memory accounting internals. The kernel module checks RSS from the task’s `mm_struct` and can enforce a hard boundary with `SIGKILL`.
 
 ### 4.5 Scheduling Behavior
 
@@ -249,9 +306,9 @@ Both containers ran `cpu_hog` for 10 seconds simultaneously. Wall-clock completi
 **Justification:** UNIX sockets support bidirectional communication over a single connection, which is required for `CMD_RUN` (blocking until exit) and `CMD_LOGS` (streaming file contents back to the client).
 
 ### Kernel monitor — mutex vs spinlock
-**Choice:** `DEFINE_MUTEX(list_lock)` to protect the monitored list.
-**Tradeoff:** A spinlock would be faster for very short critical sections but cannot be held while sleeping. A mutex can sleep waiting for the lock.
-**Justification:** The register path calls `kmalloc(GFP_KERNEL)` which can sleep — this is only safe with a mutex. The timer callback uses `mutex_trylock()` to avoid sleeping in softirq context. If the lock is held, the timer simply skips that tick and retries next second.
+**Choice:** `DEFINE_MUTEX(monitored_lock)` to protect the monitored list.
+**Tradeoff:** A spinlock can be faster for very short critical sections but cannot be held while sleeping; a mutex may sleep and is simpler to reason about with list add/remove paths.
+**Justification:** The register/unregister paths allocate/free list nodes and are simplest and safest with a mutex-based critical section.
 
 ### Scheduling experiments — nice values
 **Choice:** Used `nice()` syscall inside the container for priority control.
