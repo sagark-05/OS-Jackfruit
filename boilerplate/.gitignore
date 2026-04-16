@@ -1,0 +1,14 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+Module.symvers
+modules.order
+
+engine
+cpu_hog
+memory_hog
+io_pulse
+
+*.log
